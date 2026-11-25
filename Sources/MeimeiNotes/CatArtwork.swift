@@ -4,28 +4,77 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
+struct CatPortrait {
+    let image: NSImage
+    let isCutout: Bool
+}
+
+private struct SavedCatArtwork: Codable, Sendable {
+    let source: Data
+    let hasTransparentBackground: Bool
+    var cutout: Data?
+    var showsCutout = false
+
+    var portrait: CatPortrait? {
+        let displayedCutout = showsCutout ? cutout : nil
+        guard let image = NSImage(data: displayedCutout ?? source) else { return nil }
+        return CatPortrait(image: image, isCutout: hasTransparentBackground || displayedCutout != nil)
+    }
+}
+
 @MainActor
 final class CatArtwork: ObservableObject {
-    @Published private(set) var image: NSImage?
-    @Published private(set) var hasCustomImage: Bool
+    @Published private(set) var portrait: CatPortrait?
     @Published private(set) var isPreparing = false
     @Published var errorMessage: String?
 
-    private let starter: NSImage?
+    private let starter: CatPortrait?
     private let customURL: URL
+    private let legacyURL: URL
+    private var custom: SavedCatArtwork?
+
+    var hasCustomImage: Bool { custom != nil }
+    var canRemoveBackground: Bool { custom?.hasTransparentBackground == false }
+    var removesBackground: Bool { custom?.showsCutout == true }
 
     init(directory: URL = .applicationSupportDirectory.appending(path: "Meimei Notes")) {
-        let url = directory.appending(path: "Cat.png")
-        let custom = NSImage(contentsOf: url)
-        let starter = Bundle.main.url(forResource: "StarterCat", withExtension: "png")
+        customURL = directory.appending(path: "CatArtwork.plist")
+        legacyURL = directory.appending(path: "Cat.png")
+        starter = Bundle.main.url(forResource: "StarterCat", withExtension: "png")
             .flatMap { NSImage(contentsOf: $0) }
-        self.customURL = url
-        self.starter = starter
-        self.image = custom ?? starter
-        self.hasCustomImage = custom != nil
+            .map { CatPortrait(image: $0, isCutout: true) }
+
+        let saved = (try? Data(contentsOf: customURL)).flatMap {
+            try? PropertyListDecoder().decode(SavedCatArtwork.self, from: $0)
+        }
+        if let saved, let portrait = saved.portrait {
+            custom = saved
+            self.portrait = portrait
+        } else if let legacy = CatImageProcessor.loadLegacy(from: legacyURL), let portrait = legacy.portrait {
+            custom = legacy
+            self.portrait = portrait
+        } else {
+            portrait = starter
+        }
     }
 
-    func importImage(at url: URL, removeBackground: Bool) {
+    func importImage(at url: URL) {
+        prepare { try CatImageProcessor.prepareImport(at: url) }
+    }
+
+    func setRemovesBackground(_ remove: Bool) {
+        guard let custom, canRemoveBackground, removesBackground != remove else { return }
+        prepare {
+            var updated = custom
+            if remove, updated.cutout == nil {
+                updated.cutout = try CatImageProcessor.makeCutout(from: updated.source)
+            }
+            updated.showsCutout = remove
+            return updated
+        }
+    }
+
+    private func prepare(_ operation: @escaping @Sendable () throws -> SavedCatArtwork) {
         guard !isPreparing else { return }
         isPreparing = true
         errorMessage = nil
@@ -33,15 +82,15 @@ final class CatArtwork: ObservableObject {
         Task {
             defer { isPreparing = false }
             do {
-                let artwork = try await Task.detached(priority: .userInitiated) {
-                    try CatImageProcessor.makePNG(from: url, removeBackground: removeBackground)
-                }.value
-                guard let newImage = NSImage(data: artwork) else { throw CatImageError.unreadable }
+                let artwork = try await Task.detached(priority: .userInitiated, operation: operation).value
+                guard let portrait = artwork.portrait else { throw CatImageError.unreadable }
                 try FileManager.default.createDirectory(at: customURL.deletingLastPathComponent(),
                                                         withIntermediateDirectories: true)
-                try artwork.write(to: customURL, options: .atomic)
-                image = newImage
-                hasCustomImage = true
+                let encoder = PropertyListEncoder()
+                encoder.outputFormat = .binary
+                try encoder.encode(artwork).write(to: customURL, options: .atomic)
+                custom = artwork
+                self.portrait = portrait
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -51,9 +100,11 @@ final class CatArtwork: ObservableObject {
     func restoreStarter() {
         guard hasCustomImage, !isPreparing else { return }
         do {
-            try FileManager.default.removeItem(at: customURL)
-            image = starter
-            hasCustomImage = false
+            for url in [legacyURL, customURL] where FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            custom = nil
+            portrait = starter
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -74,8 +125,15 @@ enum CatImageError: LocalizedError {
     }
 }
 
-enum CatImageProcessor {
-    static func makePNG(from url: URL, removeBackground: Bool) throws -> Data {
+private enum CatImageProcessor {
+    static func loadLegacy(from url: URL) -> SavedCatArtwork? {
+        guard let data = try? Data(contentsOf: url), let image = cgImage(from: data) else { return nil }
+        let bounds = transparentBounds(of: image)
+        guard bounds?.isNull != true else { return nil }
+        return SavedCatArtwork(source: data, hasTransparentBackground: bounds != nil)
+    }
+
+    static func prepareImport(at url: URL) throws -> SavedCatArtwork {
         let hasAccess = url.startAccessingSecurityScopedResource()
         defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
 
@@ -89,17 +147,29 @@ enum CatImageProcessor {
             throw CatImageError.unreadable
         }
 
-        let artwork: CGImage
         if let bounds = transparentBounds(of: original) {
-            guard !bounds.isNull, let cropped = original.cropping(to: bounds) else { throw CatImageError.empty }
-            artwork = cropped
-        } else if removeBackground {
-            artwork = try foreground(of: original)
-        } else {
-            artwork = original
+            guard !bounds.isNull else { throw CatImageError.empty }
+            let cropped = crop(original, to: bounds)
+            return SavedCatArtwork(source: try png(from: cropped), hasTransparentBackground: true)
         }
 
-        let image = try resized(artwork)
+        let sourceData = try png(from: original)
+        let cutout = try? foregroundPNG(of: original)
+        return SavedCatArtwork(source: sourceData, hasTransparentBackground: false,
+                               cutout: cutout, showsCutout: cutout != nil)
+    }
+
+    static func makeCutout(from data: Data) throws -> Data {
+        guard let image = cgImage(from: data) else { throw CatImageError.unreadable }
+        return try foregroundPNG(of: image)
+    }
+
+    private static func cgImage(from data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    private static func png(from image: CGImage) throws -> Data {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
             throw CatImageError.couldNotSave
@@ -109,26 +179,12 @@ enum CatImageProcessor {
         return data as Data
     }
 
-    private static func resized(_ image: CGImage) throws -> CGImage {
-        let longestSide = max(image.width, image.height)
-        guard longestSide > 512 else { return image }
-
-        let scale = 512.0 / Double(longestSide)
-        let width = max(1, Int((Double(image.width) * scale).rounded()))
-        let height = max(1, Int((Double(image.height) * scale).rounded()))
-        let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: width * 4, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            throw CatImageError.couldNotSave
-        }
-        context.interpolationQuality = .high
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let resized = context.makeImage() else { throw CatImageError.couldNotSave }
-        return resized
+    private static func crop(_ image: CGImage, to bounds: CGRect) -> CGImage {
+        let canvas = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        return image.cropping(to: bounds.insetBy(dx: -2, dy: -2).intersection(canvas)) ?? image
     }
 
-    private static func foreground(of image: CGImage) throws -> CGImage {
+    private static func foregroundPNG(of image: CGImage) throws -> Data {
         let request = VNGenerateForegroundInstanceMaskRequest()
         let handler = VNImageRequestHandler(cgImage: image)
         do {
@@ -137,13 +193,14 @@ enum CatImageProcessor {
                 throw CatImageError.missingSubject
             }
             let buffer = try result.generateMaskedImage(ofInstances: result.allInstances,
-                                                        from: handler, croppedToInstancesExtent: true)
+                                                        from: handler, croppedToInstancesExtent: false)
             let cutout = CIImage(cvPixelBuffer: buffer)
             let context = CIContext(options: [.useSoftwareRenderer: true])
-            guard let foreground = context.createCGImage(cutout, from: cutout.extent) else {
+            guard let image = context.createCGImage(cutout, from: cutout.extent),
+                  let bounds = transparentBounds(of: image), !bounds.isNull else {
                 throw CatImageError.missingSubject
             }
-            return foreground
+            return try png(from: crop(image, to: bounds))
         } catch {
             throw CatImageError.missingSubject
         }
@@ -180,11 +237,11 @@ enum CatImageProcessor {
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         var minX = width, minY = height, maxX = -1, maxY = -1
-        var hasTransparency = false
+        var hasTransparentBackground = false
         for y in 0..<height {
             for x in 0..<width {
                 let alpha = pixels[y * bytesPerRow + x * 4 + 3]
-                if alpha < 245 { hasTransparency = true }
+                if alpha <= 8 { hasTransparentBackground = true }
                 if alpha > 8 {
                     minX = min(minX, x)
                     minY = min(minY, y)
@@ -194,7 +251,7 @@ enum CatImageProcessor {
             }
         }
 
-        guard hasTransparency else { return nil }
+        guard hasTransparentBackground else { return nil }
         guard minX <= maxX, minY <= maxY else { return .null }
         return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
     }

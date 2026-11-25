@@ -5,7 +5,6 @@ struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var cat: CatArtwork
     @ViewState private var choosingFile = false
-    @ViewState private var removeBackground = true
 
     var body: some View {
         TabView {
@@ -18,7 +17,7 @@ struct SettingsView: View {
         .frame(width: 420, height: 420)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.image]) { result in
             switch result {
-            case .success(let url): cat.importImage(at: url, removeBackground: removeBackground)
+            case .success(let url): cat.importImage(at: url)
             case .failure(let error): cat.errorMessage = error.localizedDescription
             }
         }
@@ -71,10 +70,8 @@ struct SettingsView: View {
             if preferences.values.catEnabled {
                 ZStack {
                     RoundedRectangle(cornerRadius: 13).fill(.orange.opacity(0.10))
-                    if let image = cat.image {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFit()
+                    if let portrait = cat.portrait {
+                        CatPortraitView(portrait: portrait)
                             .padding(12)
                             .accessibilityLabel("Cat preview")
                     }
@@ -89,8 +86,12 @@ struct SettingsView: View {
                 }
                 .disabled(cat.isPreparing)
 
-                Toggle("Remove background from photos", isOn: $removeBackground)
+                if cat.canRemoveBackground {
+                    Toggle("Remove photo background", isOn: Binding(
+                        get: { cat.removesBackground }, set: { cat.setRemovesBackground($0) }
+                    ))
                     .disabled(cat.isPreparing)
+                }
 
                 if cat.isPreparing {
                     HStack(spacing: 8) {
@@ -99,10 +100,6 @@ struct SettingsView: View {
                     }
                 } else if let message = cat.errorMessage {
                     Text(message).font(.caption).foregroundStyle(.red)
-                } else if removeBackground {
-                    Text("Choose a photo with one clearly visible cat or a transparent PNG.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 

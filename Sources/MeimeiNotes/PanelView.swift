@@ -39,7 +39,7 @@ struct PanelView: View {
                 IconButton("Close Panel", symbol: "xmark", action: dismiss)
             }
 
-            TimerCard(timer: timer, cat: cat.image, palette: palette) { popoverChanged(.customDuration, $0) }
+            TimerCard(timer: timer, cat: cat.portrait, palette: palette) { popoverChanged(.customDuration, $0) }
             NotesPane(notes: notes, palette: palette) { popoverChanged(.deleteNote, $0) }
         }
         .padding(16)
@@ -56,7 +56,7 @@ struct PanelView: View {
 
 private struct TimerCard: View {
     @ObservedObject var timer: FocusTimer
-    let cat: NSImage?
+    let cat: CatPortrait?
     let palette: Palette
     let popoverChanged: (Bool) -> Void
 
@@ -82,9 +82,7 @@ private struct TimerCard: View {
                 Spacer()
 
                 if palette.showsCat, let cat {
-                    Image(nsImage: cat)
-                        .resizable()
-                        .scaledToFit()
+                    CatPortraitView(portrait: cat)
                         .frame(width: 145, height: 104)
                         .accessibilityHidden(true)
                 } else {
