@@ -19,13 +19,13 @@ fi
 
 ./scripts/build-app.sh
 
-staging_dir="$(mktemp -d "$PWD/build/.installer.XXXXXXXX")"
+staging_dir="$(mktemp -d "$PWD/build/app.noindex/.installer.XXXXXXXX")"
 trap 'rm -rf "$staging_dir"' EXIT
 
 payload="$staging_dir/payload"
 app="$payload/MeimeiNotes.app"
 mkdir "$payload"
-ditto "build/Meimei Notes.app" "$app"
+ditto "build/app.noindex/Meimei Notes.app" "$app"
 
 info="$app/Contents/Info.plist"
 identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info")"

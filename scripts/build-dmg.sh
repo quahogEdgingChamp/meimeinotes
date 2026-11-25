@@ -4,12 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ./scripts/build-app.sh
 
-staging_dir="$(mktemp -d "$PWD/build/.dmg.XXXXXXXX")"
+staging_dir="$(mktemp -d "$PWD/build/app.noindex/.dmg.XXXXXXXX")"
 trap 'rm -rf "$staging_dir"' EXIT
 payload="$staging_dir/payload"
 app="$payload/MeimeiNotes.app"
 mkdir "$payload"
-ditto "build/Meimei Notes.app" "$app"
+ditto "build/app.noindex/Meimei Notes.app" "$app"
 ln -s /Applications "$payload/Applications"
 codesign --verify --deep --strict "$app"
 

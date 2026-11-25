@@ -4,8 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 module_cache="$PWD/.build/app-module-cache"
-mkdir -p build "$module_cache"
-staging_dir="$(mktemp -d "$PWD/build/.bundle.XXXXXXXX")"
+# Spotlight skips .noindex folders, so build copies don't appear next to the installed app.
+output_dir="$PWD/build/app.noindex"
+mkdir -p "$output_dir" "$module_cache"
+staging_dir="$(mktemp -d "$output_dir/.bundle.XXXXXXXX")"
 trap 'rm -rf "$staging_dir"' EXIT
 
 app_name="Meimei Notes.app"
@@ -28,7 +30,7 @@ else
 fi
 codesign --verify --deep --strict "$bundle"
 
-destination="$PWD/build/$app_name"
+destination="$output_dir/$app_name"
 if [[ -e "$destination" ]]; then
     mv "$destination" "$staging_dir/previous.app"
 fi

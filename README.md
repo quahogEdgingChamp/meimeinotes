@@ -38,7 +38,7 @@ With Apple’s Command Line Tools or Xcode installed, run this from the project 
 ./scripts/build-installer.sh
 ```
 
-The script builds `build/Meimei Notes.app` and `build/Install MeimeiNotes.pkg` for your Mac’s architecture. To build the app bundle on its own, use `./scripts/build-app.sh`.
+The script builds `build/app.noindex/Meimei Notes.app` and `build/Install MeimeiNotes.pkg` for your Mac’s architecture. To build the app bundle on its own, use `./scripts/build-app.sh`.
 
 Run `./scripts/build-dmg.sh` to build a drag-to-Applications disk image in `build`.
 
