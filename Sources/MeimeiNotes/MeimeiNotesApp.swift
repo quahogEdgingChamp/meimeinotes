@@ -44,6 +44,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         createStatusMenu()
         createMainMenu()
         watchState()
+        selectStartingClock()
         openNotes()
     }
 
@@ -73,6 +74,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.positionPanel(on: self.panel.screen ?? self.preferredScreen, using: values)
             }
         }.store(in: &subscriptions)
+
+        preferences.$values.map(\.startingClock).removeDuplicates().dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                if self?.panel.isVisible == false { self?.selectStartingClock() }
+            }
+            .store(in: &subscriptions)
 
         timer.$secondsRemaining.combineLatest(timer.$countdown).map { _ in () }
             .merge(with: stopwatch.$secondsElapsed.combineLatest(stopwatch.$session).map { _ in () },
@@ -173,6 +181,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         hotZone.trackPanel(false)
         hover = nil
         openPopovers.removeAll()
+        selectStartingClock()
+    }
+
+    /// Picks the clock chosen in Settings. Call it only while the panel is hidden, so it opens on that clock.
+    private func selectStartingClock() {
+        var inUse: Set<ClockMode> = []
+        if timer.phase == .running || timer.phase == .paused { inUse.insert(.timer) }
+        if stopwatch.phase != .ready { inUse.insert(.stopwatch) }
+        let values = preferences.values
+        let mode = values.startingClock.mode(lastUsed: values.clockMode, inUse: inUse)
+        if mode != values.clockMode { preferences.values.clockMode = mode }
     }
 
     private func updatePanelHover(pointer: CGPoint, hotScreen: NSScreen?, time: TimeInterval) {
@@ -224,7 +243,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if let existing = settingsWindow {
             window = existing
         } else {
-            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 420),
+            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 480),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Meimei Notes Settings"
             window.isReleasedWhenClosed = false

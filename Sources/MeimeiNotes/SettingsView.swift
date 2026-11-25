@@ -15,7 +15,7 @@ struct SettingsView: View {
                 .tabItem { Label("Cat Mode", systemImage: "pawprint") }
         }
         .padding(16)
-        .frame(width: 420, height: 420)
+        .frame(width: 420, height: 480)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url): cat.importImage(at: url)
@@ -54,6 +54,19 @@ struct SettingsView: View {
             .disabled(!preferences.values.hotZoneEnabled)
 
             Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Show first", selection: $preferences.values.startingClock) {
+                    ForEach(StartingClock.allCases) { option in Text(option.title).tag(option) }
+                }
+                .fixedSize()
+
+                Text(preferences.values.startingClock == .lastUsed
+                     ? "The panel opens on the clock you used last."
+                     : "The panel opens on this clock, unless only the other one is running or paused.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Toggle("Show a notification when the timer ends", isOn: $preferences.values.timerNotifications)
             Toggle("Play a sound when the timer ends", isOn: $preferences.values.timerSound)

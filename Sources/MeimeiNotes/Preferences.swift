@@ -59,6 +59,33 @@ enum ClockMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum StartingClock: String, Codable, CaseIterable, Identifiable {
+    case lastUsed, timer, stopwatch
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .lastUsed: "Last used"
+        case .timer: "Timer"
+        case .stopwatch: "Stopwatch"
+        }
+    }
+
+    /// The clock the panel opens on. `inUse` holds the clocks that are running or paused.
+    func mode(lastUsed: ClockMode, inUse: Set<ClockMode>) -> ClockMode {
+        let preferred: ClockMode
+        switch self {
+        case .lastUsed: return lastUsed
+        case .timer: preferred = .timer
+        case .stopwatch: preferred = .stopwatch
+        }
+        // Don't hide a clock that is counting behind an idle one.
+        let other: ClockMode = preferred == .timer ? .stopwatch : .timer
+        return !inUse.contains(preferred) && inUse.contains(other) ? other : preferred
+    }
+}
+
 struct PreferenceValues: Codable, Equatable {
     var hotZoneEnabled = true
     var triggerLocation = TriggerLocation.bottomLeft
@@ -67,6 +94,7 @@ struct PreferenceValues: Codable, Equatable {
     var timerSound = true
     private var timerNotificationPreference: Bool?
     private var clockModePreference: ClockMode?
+    private var startingClockPreference: StartingClock?
 
     var timerNotifications: Bool {
         get { timerNotificationPreference ?? true }
@@ -76,6 +104,11 @@ struct PreferenceValues: Codable, Equatable {
     var clockMode: ClockMode {
         get { clockModePreference ?? .timer }
         set { clockModePreference = newValue }
+    }
+
+    var startingClock: StartingClock {
+        get { startingClockPreference ?? .lastUsed }
+        set { startingClockPreference = newValue }
     }
 
     var triggerPoint: TriggerPoint { triggerLocation.point(custom: customPoint) }
