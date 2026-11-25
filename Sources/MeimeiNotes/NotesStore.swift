@@ -4,6 +4,12 @@ import Foundation
 struct Note: Codable, Identifiable {
     let id: UUID
     var text: String
+    private var pinned: Bool?
+
+    var isPinned: Bool {
+        get { pinned ?? false }
+        set { pinned = newValue ? true : nil }
+    }
 
     init(id: UUID = UUID(), text: String = "") {
         self.id = id
@@ -62,6 +68,19 @@ final class NotesStore: ObservableObject {
         notebook.selectedID = id
     }
 
+    func matching(_ query: String) -> [Note] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = term.isEmpty ? notes : notes.filter {
+            $0.title.localizedStandardContains(term) || $0.text.localizedStandardContains(term)
+        }
+        return matches.filter(\.isPinned) + matches.filter { !$0.isPinned }
+    }
+
+    func togglePin(_ id: UUID) {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
+        notebook.notes[index].isPinned.toggle()
+    }
+
     func text(for id: UUID) -> String {
         notes.first { $0.id == id }?.text ?? ""
     }
@@ -78,6 +97,12 @@ final class NotesStore: ObservableObject {
         if remaining.isEmpty { remaining = [Note()] }
         let selection = id == current.id ? remaining[min(index, remaining.count - 1)].id : current.id
         notebook = Notebook(notes: remaining, selectedID: selection)
+    }
+
+    func export(to url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(notebook).write(to: url, options: .atomic)
     }
 }
 

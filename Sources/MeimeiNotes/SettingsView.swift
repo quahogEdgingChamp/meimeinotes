@@ -54,6 +54,7 @@ struct SettingsView: View {
 
             Divider()
 
+            Toggle("Show a notification when the timer ends", isOn: $preferences.values.timerNotifications)
             Toggle("Play a sound when the timer ends", isOn: $preferences.values.timerSound)
             Spacer(minLength: 0)
         }

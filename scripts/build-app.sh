@@ -21,7 +21,12 @@ xcrun --sdk macosx swiftc \
 
 cp App/Info.plist "$bundle/Contents/"
 cp App/Resources/* "$bundle/Contents/Resources/"
-codesign --force --sign - "$bundle"
+if [[ -n "${MEIMEINOTES_APP_SIGN_IDENTITY:-}" ]]; then
+    codesign --force --sign "$MEIMEINOTES_APP_SIGN_IDENTITY" --options runtime --timestamp "$bundle"
+else
+    codesign --force --sign - "$bundle"
+fi
+codesign --verify --deep --strict "$bundle"
 
 destination="$PWD/build/$app_name"
 if [[ -e "$destination" ]]; then

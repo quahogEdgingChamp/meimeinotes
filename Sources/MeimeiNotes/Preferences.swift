@@ -1,4 +1,5 @@
 import Combine
+import CoreGraphics
 import Foundation
 
 struct TriggerPoint: Codable, Equatable {
@@ -51,6 +52,12 @@ struct PreferenceValues: Codable, Equatable {
     var customPoint = TriggerPoint(x: 0.5, y: 1)
     var catEnabled = false
     var timerSound = true
+    private var timerNotificationPreference: Bool?
+
+    var timerNotifications: Bool {
+        get { timerNotificationPreference ?? true }
+        set { timerNotificationPreference = newValue }
+    }
 
     var triggerPoint: TriggerPoint { triggerLocation.point(custom: customPoint) }
 

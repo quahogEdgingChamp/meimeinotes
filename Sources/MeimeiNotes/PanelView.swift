@@ -3,14 +3,20 @@ import SwiftUI
 // Select the property wrapper on SDKs that also ship a State macro.
 typealias ViewState<Value> = State<Value>
 
+enum PanelPopover: Hashable {
+    case customDuration, deleteNote
+}
+
 struct PanelView: View {
     @Environment(\.colorScheme) private var colorScheme
     let notes: NotesStore
     let timer: FocusTimer
     @ObservedObject var preferences: Preferences
     @ObservedObject var cat: CatArtwork
+    let exportNotes: () -> Void
     let openSettings: () -> Void
     let dismiss: () -> Void
+    let popoverChanged: (PanelPopover, Bool) -> Void
 
     var body: some View {
         let palette = Palette(isDark: colorScheme == .dark, showsCat: preferences.values.catEnabled)
@@ -28,12 +34,13 @@ struct PanelView: View {
 
                 Spacer()
 
+                IconButton("Export Notes…", symbol: "square.and.arrow.up", action: exportNotes)
                 IconButton("Settings", symbol: "gearshape", action: openSettings)
                 IconButton("Close Panel", symbol: "xmark", action: dismiss)
             }
 
-            TimerCard(timer: timer, cat: cat.image, palette: palette)
-            NotesPane(notes: notes, palette: palette)
+            TimerCard(timer: timer, cat: cat.image, palette: palette) { popoverChanged(.customDuration, $0) }
+            NotesPane(notes: notes, palette: palette) { popoverChanged(.deleteNote, $0) }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -51,6 +58,7 @@ private struct TimerCard: View {
     @ObservedObject var timer: FocusTimer
     let cat: NSImage?
     let palette: Palette
+    let popoverChanged: (Bool) -> Void
 
     @ViewState private var editingDuration = false
     @ViewState private var minutes = ""
@@ -125,6 +133,7 @@ private struct TimerCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 15).strokeBorder(palette.border).allowsHitTesting(false)
         }
+        .onChange(of: editingDuration) { _, shown in popoverChanged(shown) }
     }
 
     private var timerActions: some View {
@@ -198,60 +207,149 @@ private struct TimerCard: View {
 private struct NotesPane: View {
     @ObservedObject var notes: NotesStore
     let palette: Palette
+    let popoverChanged: (Bool) -> Void
     @ViewState private var confirmingDelete = false
+    @ViewState private var browsing = false
+    @ViewState private var search = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         let note = notes.current
 
         VStack(spacing: 7) {
             HStack(spacing: 5) {
-                Menu {
-                    Picker("Note", selection: Binding(get: { notes.current.id }, set: notes.select)) {
-                        ForEach(notes.notes) { item in Text(item.title).tag(item.id) }
-                    }
+                Button {
+                    confirmingDelete = false
+                    browsing.toggle()
+                    if browsing { search = "" }
                 } label: {
-                    Text(note.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
+                    HStack(spacing: 7) {
+                        Image(systemName: browsing ? "chevron.left" : "magnifyingglass")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(palette.accent)
+                        Text(browsing ? "Back to note" : note.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 27)
+                    .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
-                .frame(maxWidth: 230, alignment: .leading)
-                .help("Switch notes")
-                .accessibilityLabel("Switch Notes")
+                .buttonStyle(.plain)
+                .help(browsing ? "Return to the editor" : "Search and switch notes")
+                .accessibilityLabel(browsing ? "Back to Note" : "Search and Switch Notes")
                 .accessibilityValue(note.title)
 
-                Spacer(minLength: 5)
+                if !browsing {
+                    IconButton(note.isPinned ? "Unpin Note" : "Pin Note", symbol: note.isPinned ? "pin.fill" : "pin",
+                               foreground: note.isPinned ? palette.accent : .secondary) { notes.togglePin(note.id) }
+                }
 
-                IconButton("New Note", symbol: "plus", background: palette.control) { notes.create() }
-                IconButton("Delete Note", symbol: "trash") { confirmingDelete = true }
-                    .popover(isPresented: $confirmingDelete, arrowEdge: .bottom) {
-                        deleteConfirmation(for: note)
-                    }
+                IconButton("New Note", symbol: "plus", background: palette.control) {
+                    confirmingDelete = false
+                    notes.create()
+                    browsing = false
+                }
+                if !browsing {
+                    IconButton("Delete Note", symbol: "trash") { confirmingDelete = true }
+                        .popover(isPresented: $confirmingDelete, arrowEdge: .bottom) {
+                            deleteConfirmation(for: note)
+                        }
+                }
             }
 
-            TextEditor(text: Binding(get: { notes.text(for: note.id) }, set: { notes.update(note.id, text: $0) }))
-                .id(note.id)
-                .font(.system(size: 14))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .accessibilityLabel("Note text")
-                .overlay(alignment: .topLeading) {
-                    if note.text.isEmpty {
-                        Text("Write a note…")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 13)
-                            .padding(.top, 10)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .background(palette.paper, in: RoundedRectangle(cornerRadius: 12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12).strokeBorder(palette.border).allowsHitTesting(false)
-                }
+            if browsing {
+                noteBrowser
+            } else {
+                noteEditor(for: note)
+            }
         }
         .frame(maxHeight: .infinity)
+        .onChange(of: confirmingDelete) { _, shown in popoverChanged(shown) }
+    }
+
+    private var noteBrowser: some View {
+        let matches = notes.matching(search)
+
+        return VStack(spacing: 7) {
+            TextField("Search notes…", text: $search)
+                .textFieldStyle(.roundedBorder)
+                .focused($searchFocused)
+                .onAppear { searchFocused = true }
+                .onSubmit {
+                    if let first = matches.first { open(first) }
+                }
+
+            if matches.isEmpty {
+                Text("No matching notes")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        ForEach(matches) { note in
+                            let isCurrent = notes.current.id == note.id
+                            Button { open(note) } label: {
+                                HStack(spacing: 7) {
+                                    if note.isPinned {
+                                        Image(systemName: "pin.fill").foregroundStyle(palette.accent)
+                                    }
+                                    Text(note.title).lineLimit(1)
+                                    Spacer(minLength: 6)
+                                    if isCurrent {
+                                        Image(systemName: "checkmark").foregroundStyle(palette.accent)
+                                    }
+                                }
+                                .font(.system(size: 13))
+                                .padding(7)
+                                .background(isCurrent ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(note.title)
+                            .accessibilityValue(note.isPinned ? "Pinned" : "")
+                            .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                        }
+                    }
+                    .padding(2)
+                }
+            }
+        }
+        .padding(8)
+        .background(palette.paper, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12).strokeBorder(palette.border).allowsHitTesting(false)
+        }
+    }
+
+    private func open(_ note: Note) {
+        notes.select(note.id)
+        browsing = false
+    }
+
+    private func noteEditor(for note: Note) -> some View {
+        TextEditor(text: Binding(get: { notes.text(for: note.id) }, set: { notes.update(note.id, text: $0) }))
+            .id(note.id)
+            .font(.system(size: 14))
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .accessibilityLabel("Note text")
+            .overlay(alignment: .topLeading) {
+                if note.text.isEmpty {
+                    Text("Write a note…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 13)
+                        .padding(.top, 10)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .background(palette.paper, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12).strokeBorder(palette.border).allowsHitTesting(false)
+            }
     }
 
     private func deleteConfirmation(for note: Note) -> some View {

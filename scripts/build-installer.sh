@@ -2,6 +2,21 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+release=false
+installer_name="Install MeimeiNotes.pkg"
+if [[ "$#" -eq 1 && "${1:-}" == "--release" ]]; then
+    release=true
+    : "${MEIMEINOTES_APP_SIGN_IDENTITY:?Set the Developer ID Application signing identity}"
+    : "${MEIMEINOTES_INSTALLER_SIGN_IDENTITY:?Set the Developer ID Installer signing identity}"
+    : "${MEIMEINOTES_NOTARY_PROFILE:?Set a notarytool Keychain profile name}"
+    set -- --sign "$MEIMEINOTES_INSTALLER_SIGN_IDENTITY"
+    installer_name="Install MeimeiNotes (Release).pkg"
+elif [[ "$#" -ne 0 ]]; then
+    printf 'Usage: %s [--release]\n' "$0" >&2
+    exit 2
+fi
+
 ./scripts/build-app.sh
 
 staging_dir="$(mktemp -d "$PWD/build/.installer.XXXXXXXX")"
@@ -19,7 +34,6 @@ minimum_os="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$info"
 architecture="$(xcrun lipo -archs "$app/Contents/MacOS/MeimeiNotes")"
 package_id="$identifier.pkg"
 component="MeimeiNotesComponent.pkg"
-installer_name="Install MeimeiNotes.pkg"
 
 pkgbuild --root "$payload" --component-plist App/InstallerComponents.plist \
     --install-location /Applications --identifier "$package_id" --version "$version" \
@@ -47,7 +61,21 @@ cat > "$staging_dir/Distribution.xml" <<EOF
 </installer-gui-script>
 EOF
 
+package="$staging_dir/$installer_name"
 productbuild --distribution "$staging_dir/Distribution.xml" --package-path "$staging_dir" \
-    --resources App/InstallerResources "$staging_dir/$installer_name"
-mv -f "$staging_dir/$installer_name" "build/$installer_name"
+    --resources App/InstallerResources "$@" "$package"
+
+if "$release"; then
+    result="$staging_dir/notary-result.json"
+    if ! xcrun notarytool submit "$package" --keychain-profile "$MEIMEINOTES_NOTARY_PROFILE" \
+            --wait --output-format json > "$result" \
+            || [[ "$(plutil -extract status raw -o - "$result")" != "Accepted" ]]; then
+        cat "$result" >&2
+        exit 1
+    fi
+    xcrun stapler staple "$package"
+    xcrun stapler validate "$package"
+fi
+
+mv -f "$package" "build/$installer_name"
 printf 'Built %s\n' "$PWD/build/$installer_name"

@@ -7,15 +7,18 @@ Meimei Notes is a native macOS menu-bar app with sticky notes and a countdown in
 1. Double-click **Install MeimeiNotes.pkg** in the `build` folder and follow the macOS Installer. It puts **MeimeiNotes.app** in Applications.
 2. Press **⌘Space**, type **meimeinotes**, and press **Return** to open the panel.
 
-Pause briefly with your pointer in the bottom-left corner of a display to bring the panel back. You can also choose **Open Notes** from the Meimei Notes icon in the menu bar. Close the panel with **×** or press **Esc** while it has keyboard focus.
+If you downloaded a disk image, open it and drag **MeimeiNotes** onto **Applications** before launching it.
+
+Pause briefly with your pointer in the bottom-left corner of a display to bring the panel back. Move onto the panel to keep it open, then move away to dismiss it. **⌘Space** and **Open Notes** in the menu bar also bring it back. You can close it with **Esc** or **×**.
 
 In **Settings → General**, select any corner or choose **Custom spot** and click the display preview to place the trigger. The chosen position applies to each connected display. You can turn the pointer trigger off and use the menu bar to open the panel.
 
 ## Notes and timer
 
-- Write in the note area. Use **+** for a new note and the note title menu to switch between saved notes. The app saves your edits locally as you type.
+- Write in the note area. Use **+** for a new note and click the magnifying glass next to the note title to search titles and text or switch notes. Pin a note to keep it at the top of the list. The app saves edits locally as you type.
+- Choose **Export Notes…** from the panel or the menu bar to save a JSON backup with all notes, pins, and the selected note.
 - Pick a timer preset or use **Custom…** to set a duration from 1 second to 99 minutes and 59 seconds. Start, pause, resume, or reset the countdown from the panel.
-- The timer keeps running when you close the panel, with the remaining time shown in the menu bar. The app plays a sound when the timer ends while the app is running. You can mute it in **Settings → General**.
+- The timer keeps running when you close the panel, with the remaining time shown in the menu bar. Allow notifications when macOS asks on the first countdown. The system can deliver the countdown alert with the panel closed or after your Mac wakes. Change notifications and the app’s chime in **Settings → General**.
 
 ## Cat mode
 
@@ -34,3 +37,16 @@ With Apple’s Command Line Tools or Xcode installed, run this from the project 
 ```
 
 The script builds `build/Meimei Notes.app` and `build/Install MeimeiNotes.pkg` for your Mac’s architecture. To build the app bundle on its own, use `./scripts/build-app.sh`.
+
+Run `./scripts/build-dmg.sh` to build a drag-to-Applications disk image in `build`.
+
+## Sign and notarize a release
+
+Use Developer ID Application and Developer ID Installer identities installed in Keychain and a profile created with `xcrun notarytool store-credentials`. The release build signs the app with Hardened Runtime, signs the installer, submits it to Apple, and validates the stapled ticket before producing `build/Install MeimeiNotes (Release).pkg`.
+
+```sh
+MEIMEINOTES_APP_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
+MEIMEINOTES_INSTALLER_SIGN_IDENTITY='Developer ID Installer: Your Name (TEAMID)' \
+MEIMEINOTES_NOTARY_PROFILE='meimeinotes-notary' \
+./scripts/build-installer.sh --release
+```

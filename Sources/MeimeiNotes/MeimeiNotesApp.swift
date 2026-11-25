@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct MeimeiNotesApp {
@@ -23,11 +24,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let chime = NSSound(named: "Glass")
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var exportDialog: NSSavePanel?
+    private var hover = PanelHover()
+    private var openPopovers: Set<PanelPopover> = []
     private var subscriptions: Set<AnyCancellable> = []
-    private lazy var hotZone = HotZoneMonitor { [weak self] screen in
+    private lazy var notifications: TimerNotifications? = {
+        guard Bundle.main.bundleIdentifier != nil else { return nil }
+        return TimerNotifications { [weak self] in self?.openNotes() }
+    }()
+    private lazy var hotZone = HotZoneMonitor(onEnter: { [weak self] screen in
         guard let self, !self.panel.isVisible || self.panel.screen?.frame != screen.frame else { return }
-        self.showPanel(on: screen, focus: false)
-    }
+        self.showPanel(on: screen, focus: false, fromHotZone: true)
+    }, onPointer: { [weak self] pointer, atHotZone, time in
+        self?.updatePanelHover(pointer: pointer, atHotZone: atHotZone, time: time)
+    })
     private lazy var panel: NotesPanel = makePanel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -60,6 +70,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] _ in self?.updateStatusItem() }
             .store(in: &subscriptions)
 
+        timer.$countdown.combineLatest(preferences.$values.map(\.timerNotifications))
+            .map { countdown, enabled in TimerNotificationPlan(enabled: enabled, countdown: countdown) }
+            .removeDuplicates()
+            .sink { [weak self] in self?.notifications?.apply($0) }
+            .store(in: &subscriptions)
+
         timer.onFinish = { [weak self] in
             guard let self, self.preferences.values.timerSound else { return }
             if self.chime?.play() != true { NSSound.beep() }
@@ -80,10 +96,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.animationBehavior = .utilityWindow
+        panel.dismiss = { [weak self] in self?.dismissPanel() }
         panel.contentView = NSHostingView(rootView: PanelView(
             notes: notes, timer: timer, preferences: preferences, cat: cat,
+            exportNotes: { [weak self] in self?.exportNotes() },
             openSettings: { [weak self] in self?.openSettings() },
-            dismiss: { [weak self] in self?.panel.orderOut(nil) }
+            dismiss: { [weak self] in self?.dismissPanel() },
+            popoverChanged: { [weak self] popover, shown in
+                if shown { self?.openPopovers.insert(popover) } else { self?.openPopovers.remove(popover) }
+            }
         ))
         return panel
     }
@@ -95,16 +116,54 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                                                visibleFrame: screen.visibleFrame))
     }
 
-    private func showPanel(on screen: NSScreen?, focus: Bool) {
+    private func showPanel(on screen: NSScreen?, focus: Bool, fromHotZone: Bool = false) {
         positionPanel(on: screen)
+        hover = PanelHover(openedAtHotZone: fromHotZone)
+        hotZone.trackPanel(true)
         if focus { panel.makeKeyAndOrderFront(nil) } else { panel.orderFrontRegardless() }
     }
 
     @objc private func openNotes() {
-        if panel.isVisible {
-            panel.makeKeyAndOrderFront(nil)
-        } else {
-            showPanel(on: preferredScreen, focus: true)
+        showPanel(on: panel.isVisible ? nil : preferredScreen, focus: true)
+    }
+
+    private func dismissPanel() {
+        panel.orderOut(nil)
+        hotZone.trackPanel(false)
+        openPopovers.removeAll()
+    }
+
+    private func updatePanelHover(pointer: CGPoint, atHotZone: Bool, time: TimeInterval) {
+        guard panel.isVisible else { return }
+        let busy = NSEvent.pressedMouseButtons != 0 || RunLoop.main.currentMode == .eventTracking
+            || exportDialog != nil || !openPopovers.isEmpty
+        if hover.shouldDismiss(at: time, insidePanel: panel.frame.contains(pointer),
+                              insideHotZone: atHotZone, interactionInProgress: busy) {
+            dismissPanel()
+        }
+    }
+
+    @objc private func exportNotes() {
+        guard exportDialog == nil else { return }
+        let dialog = NSSavePanel()
+        dialog.title = "Export Notes"
+        dialog.prompt = "Export"
+        dialog.allowedContentTypes = [.json]
+        dialog.nameFieldStringValue = "MeimeiNotes Backup.json"
+        exportDialog = dialog
+
+        NSApp.activate()
+        dialog.begin { [weak self] response in
+            guard let self else { return }
+            defer { self.exportDialog = nil }
+            guard response == .OK, let url = dialog.url else { return }
+            do {
+                try self.notes.export(to: url)
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.messageText = "Couldn’t export notes"
+                alert.runModal()
+            }
         }
     }
 
@@ -130,6 +189,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         let menu = NSMenu()
         menu.addItem(command("Open Notes", #selector(openNotes)))
+        menu.addItem(command("Export Notes…", #selector(exportNotes)))
         menu.addItem(command("Settings…", #selector(openSettings), key: ","))
         menu.addItem(.separator())
         menu.addItem(command("Quit Meimei Notes", #selector(quit), key: "q"))
@@ -191,8 +251,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 private final class NotesPanel: NSPanel {
+    var dismiss: (() -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    override func cancelOperation(_ sender: Any?) { orderOut(sender) }
+    override func cancelOperation(_ sender: Any?) { dismiss?() }
 }
