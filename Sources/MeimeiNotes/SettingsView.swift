@@ -46,7 +46,8 @@ struct SettingsView: View {
                     }
                 }
 
-                Text(isCustomSpot ? "Click the display to place the hot zone." : "Pause briefly in the marked corner to open the panel.")
+                Text(isCustomSpot ? "Click the display to place the hot zone. For a spot behind the camera notch, pause just below it."
+                     : "Pause briefly in the marked corner to open the panel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

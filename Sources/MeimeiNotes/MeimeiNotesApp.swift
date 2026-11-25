@@ -33,8 +33,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return TimerNotifications { [weak self] in self?.openNotes() }
     }()
     private lazy var hotZone = HotZoneMonitor(onEnter: { [weak self] screen in
-        guard let self, !self.panel.isVisible || self.panel.screen?.frame != screen.frame else { return }
-        self.showPanel(on: screen, focus: false, fromHotZone: true)
+        guard let self else { return }
+        if self.panel.isVisible, self.panel.isOnActiveSpace, self.panel.screen?.frame == screen.frame {
+            self.panel.orderFrontRegardless()
+        } else {
+            self.showPanel(on: screen, focus: false, fromHotZone: true)
+        }
     }, onPointer: { [weak self] pointer, atHotZone, time in
         self?.updatePanelHover(pointer: pointer, atHotZone: atHotZone, time: time)
     })

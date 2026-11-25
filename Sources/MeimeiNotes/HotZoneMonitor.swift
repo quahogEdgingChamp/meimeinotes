@@ -33,10 +33,10 @@ final class HotZoneMonitor {
     private func updatePolling() {
         let shouldPoll = preferences.hotZoneEnabled || tracksPanel
         if shouldPoll, pollingTimer == nil {
-            let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.samplePointer() }
             }
-            timer.tolerance = 0.035
+            timer.tolerance = 0.01
             RunLoop.main.add(timer, forMode: .common)
             pollingTimer = timer
         } else if !shouldPoll {
@@ -49,15 +49,24 @@ final class HotZoneMonitor {
     static func screen(at pointer: CGPoint) -> NSScreen? {
         let screens = NSScreen.screens
         return screens.first { NSMouseInRect(pointer, $0.frame, false) }
-            ?? screens.first { $0.frame.contains(pointer) }
+            ?? screens.first { screen in
+                (screen.frame.minX...screen.frame.maxX).contains(pointer.x)
+                    && (screen.frame.minY...screen.frame.maxY).contains(pointer.y)
+            }
+    }
+
+    private func hotScreen(at pointer: CGPoint) -> NSScreen? {
+        guard preferences.hotZoneEnabled else { return nil }
+        let matches = NSScreen.screens.filter { screen in
+            preferences.isInHotZone(pointer, screen: screen.frame, cameraHousing: screen.cameraHousing)
+        }
+        return matches.first { NSMouseInRect(pointer, $0.frame, false) } ?? matches.first
     }
 
     private func samplePointer() {
         let pointer = NSEvent.mouseLocation
         let now = ProcessInfo.processInfo.systemUptime
-        let hotScreen = preferences.hotZoneEnabled ? Self.screen(at: pointer).flatMap { screen in
-            preferences.isInHotZone(pointer, screen: screen.frame) ? screen : nil
-        } : nil
+        let hotScreen = hotScreen(at: pointer)
 
         if tracksPanel { onPointer(pointer, hotScreen != nil, now) }
 
@@ -70,10 +79,19 @@ final class HotZoneMonitor {
             hoveredScreen = screen.frame
             enteredAt = now
             hasOpened = false
-        } else if !hasOpened, now - enteredAt >= 0.25 {
+        } else if !hasOpened, now - enteredAt >= 0.16 {
             hasOpened = true
             onEnter(screen)
         }
+    }
+}
+
+private extension NSScreen {
+    var cameraHousing: CGRect? {
+        let height = safeAreaInsets.top
+        guard height > 0, let left = auxiliaryTopLeftArea, let right = auxiliaryTopRightArea,
+              right.minX > left.maxX else { return nil }
+        return CGRect(x: left.maxX, y: frame.maxY - height, width: right.minX - left.maxX, height: height)
     }
 }
 

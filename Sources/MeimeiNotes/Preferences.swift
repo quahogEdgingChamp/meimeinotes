@@ -61,12 +61,17 @@ struct PreferenceValues: Codable, Equatable {
 
     var triggerPoint: TriggerPoint { triggerLocation.point(custom: customPoint) }
 
-    func isInHotZone(_ pointer: CGPoint, screen: CGRect) -> Bool {
+    func isInHotZone(_ pointer: CGPoint, screen: CGRect, cameraHousing: CGRect? = nil) -> Bool {
         guard (screen.minX...screen.maxX).contains(pointer.x),
               (screen.minY...screen.maxY).contains(pointer.y) else { return false }
         let trigger = triggerPoint.position(in: screen)
-        let radius: CGFloat = triggerLocation == .custom ? 15 : 8
-        return abs(pointer.x - trigger.x) <= radius && abs(pointer.y - trigger.y) <= radius
+        let radius: CGFloat = triggerLocation == .custom ? 22 : 18
+        guard abs(pointer.x - trigger.x) <= radius else { return false }
+        if let cameraHousing, trigger.y >= cameraHousing.minY,
+           (cameraHousing.minX...cameraHousing.maxX).contains(trigger.x) {
+            return pointer.y >= cameraHousing.minY - radius
+        }
+        return abs(pointer.y - trigger.y) <= radius
     }
 }
 

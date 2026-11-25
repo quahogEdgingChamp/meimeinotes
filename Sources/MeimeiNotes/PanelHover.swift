@@ -13,7 +13,7 @@ struct PanelHover {
                                 interactionInProgress: Bool) -> Bool {
         if insidePanel { hasEntered = true }
 
-        if insidePanel || interactionInProgress || (openedAtHotZone && !hasEntered && insideHotZone) {
+        if insidePanel || insideHotZone || interactionInProgress {
             leftAt = nil
             return false
         }
