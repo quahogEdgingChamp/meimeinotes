@@ -57,7 +57,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidChangeScreenParameters(_ notification: Notification) {
-        if panel.isVisible { positionPanel(on: panel.screen ?? preferredScreen) }
+        if panel.isVisible { positionPanel(on: panel.screen ?? preferredScreen, using: preferences.values) }
     }
 
     private var preferredScreen: NSScreen? {
@@ -65,8 +65,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func watchState() {
-        preferences.$values.removeDuplicates().sink { [weak self] in
-            self?.hotZone.apply($0)
+        preferences.$values.removeDuplicates().sink { [weak self] values in
+            guard let self else { return }
+            self.hotZone.apply(values)
+            if self.preferences.values.catEnabled != values.catEnabled, self.panel.isVisible {
+                self.positionPanel(on: self.panel.screen ?? self.preferredScreen, using: values)
+            }
         }.store(in: &subscriptions)
 
         timer.$secondsRemaining.combineLatest(timer.$countdown)
@@ -87,7 +91,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makePanel() -> NotesPanel {
-        let panel = NotesPanel(contentRect: NSRect(x: 0, y: 0, width: 376, height: 464),
+        let panel = NotesPanel(contentRect: NSRect(origin: .zero, size: panelSize(for: preferences.values)),
                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "Meimei Notes"
         panel.isFloatingPanel = true
@@ -113,15 +117,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return panel
     }
 
-    private func positionPanel(on screen: NSScreen?) {
+    private func panelSize(for values: PreferenceValues) -> CGSize {
+        values.catEnabled ? CGSize(width: 404, height: 584) : CGSize(width: 376, height: 464)
+    }
+
+    private func positionPanel(on screen: NSScreen?, using values: PreferenceValues) {
         guard let screen else { return }
-        let point = preferences.values.triggerPoint
-        panel.setFrameOrigin(point.panelOrigin(for: panel.frame.size, screen: screen.frame,
-                                               visibleFrame: screen.visibleFrame))
+        let visible = screen.visibleFrame
+        guard visible.width > 24, visible.height > 24 else { return }
+        let desired = panelSize(for: values)
+        let size = CGSize(width: min(desired.width, visible.width - 24), height: min(desired.height, visible.height - 24))
+        let origin = values.triggerPoint.panelOrigin(for: size, screen: screen.frame, visibleFrame: visible)
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 
     private func showPanel(on screen: NSScreen?, focus: Bool, fromHotZone: Bool = false) {
-        positionPanel(on: screen)
+        positionPanel(on: screen, using: preferences.values)
         hover = PanelHover(openedAtHotZone: fromHotZone)
         hotZone.trackPanel(true)
         if focus { panel.makeKeyAndOrderFront(nil) } else { panel.orderFrontRegardless() }

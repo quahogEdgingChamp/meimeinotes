@@ -22,7 +22,7 @@ struct PanelView: View {
         let palette = Palette(isDark: colorScheme == .dark, showsCat: preferences.values.catEnabled)
         VStack(spacing: 14) {
             HStack(spacing: 9) {
-                Image(systemName: palette.showsCat ? "pawprint.fill" : "note.text")
+                Image(systemName: "note.text")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(palette.accent)
                     .frame(width: 31, height: 31)
@@ -39,8 +39,10 @@ struct PanelView: View {
                 IconButton("Close Panel", symbol: "xmark", action: dismiss)
             }
 
-            TimerCard(timer: timer, cat: cat.portrait, palette: palette) { popoverChanged(.customDuration, $0) }
-            NotesPane(notes: notes, palette: palette) { popoverChanged(.deleteNote, $0) }
+            TimerCard(timer: timer, palette: palette) { popoverChanged(.customDuration, $0) }
+            NotesPane(notes: notes, portrait: palette.showsCat ? cat.portrait : nil, palette: palette) {
+                popoverChanged(.deleteNote, $0)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,7 +58,6 @@ struct PanelView: View {
 
 private struct TimerCard: View {
     @ObservedObject var timer: FocusTimer
-    let cat: CatPortrait?
     let palette: Palette
     let popoverChanged: (Bool) -> Void
 
@@ -65,7 +66,7 @@ private struct TimerCard: View {
     @ViewState private var seconds = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: palette.showsCat ? 8 : 10) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(status)
@@ -80,16 +81,9 @@ private struct TimerCard: View {
                 }
 
                 Spacer()
-
-                if palette.showsCat, let cat {
-                    CatPortraitView(portrait: cat)
-                        .frame(width: 145, height: 104)
-                        .accessibilityHidden(true)
-                } else {
-                    timerActions
-                }
+                timerActions
             }
-            .frame(height: palette.showsCat && cat != nil ? 104 : 77)
+            .frame(height: palette.showsCat ? 65 : 77)
 
             HStack(spacing: 5) {
                 ForEach(FocusTimer.presets, id: \.self) { preset in
@@ -114,8 +108,6 @@ private struct TimerCard: View {
                 .popover(isPresented: $editingDuration, arrowEdge: .bottom) { durationEditor }
 
                 Spacer(minLength: 1)
-
-                if palette.showsCat, cat != nil { timerActions }
             }
 
             GeometryReader { proxy in
@@ -126,7 +118,7 @@ private struct TimerCard: View {
             .frame(height: 3)
             .accessibilityHidden(true)
         }
-        .padding(13)
+        .padding(palette.showsCat ? 11 : 13)
         .background(palette.card, in: RoundedRectangle(cornerRadius: 15))
         .overlay {
             RoundedRectangle(cornerRadius: 15).strokeBorder(palette.border).allowsHitTesting(false)
@@ -204,6 +196,7 @@ private struct TimerCard: View {
 
 private struct NotesPane: View {
     @ObservedObject var notes: NotesStore
+    let portrait: CatPortrait?
     let palette: Palette
     let popoverChanged: (Bool) -> Void
     @ViewState private var confirmingDelete = false
@@ -327,6 +320,28 @@ private struct NotesPane: View {
     }
 
     private func noteEditor(for note: Note) -> some View {
+        GeometryReader { geometry in
+            let portraitHeight = min(184, geometry.size.height - 142)
+
+            VStack(spacing: 0) {
+                if let portrait, portraitHeight >= 74 {
+                    CatNoteHeader(portrait: portrait, palette: palette)
+                        .frame(height: portraitHeight)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                editor(for: note)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(palette.paper)
+            .clipShape(.rect(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12).strokeBorder(palette.border).allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func editor(for note: Note) -> some View {
         TextEditor(text: Binding(get: { notes.text(for: note.id) }, set: { notes.update(note.id, text: $0) }))
             .id(note.id)
             .font(.system(size: 14))
@@ -343,10 +358,6 @@ private struct NotesPane: View {
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
-            }
-            .background(palette.paper, in: RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12).strokeBorder(palette.border).allowsHitTesting(false)
             }
     }
 
@@ -419,13 +430,16 @@ private struct ChipStyle: ButtonStyle {
     }
 }
 
-private struct Palette {
+struct Palette {
     let isDark: Bool
     let showsCat: Bool
 
     var surface: Color { showsCat ? color(0xfff6f0, 0x281f20) : color(0xf4f5f7, 0x202328) }
     var card: Color { showsCat ? color(0xffeadd, 0x3b2929) : color(0xffffff, 0x2b2e34) }
     var paper: Color { showsCat ? color(0xfffcf9, 0x312526) : color(0xffffff, 0x272a30) }
+    var portraitBackdrop: Color { color(0xf4d9c5, 0x513831) }
+    var portraitHighlight: Color { color(0xfff3e4, 0x735044) }
+    var portraitMat: Color { color(0xecd0bf, 0x402d28) }
     var accent: Color { showsCat ? color(0x9b472f, 0xffb497) : color(0x4354a0, 0xb4bfff) }
     var action: Color { showsCat ? color(0x9b472f, 0xffb497) : color(0x4656a6, 0xb4bfff) }
     var onAction: Color { isDark ? .black : .white }

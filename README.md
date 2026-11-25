@@ -22,7 +22,7 @@ In **Settings → General**, select any corner or choose **Custom spot** and cli
 
 ## Cat mode
 
-Cat mode starts off. Turn it on in **Settings → Cat Mode** to give the panel a warm theme and a cat beside the timer. To use your own cat, choose an image there. Meimei Notes can remove the background from a photo on your Mac or use a transparent PNG. Your original file stays on disk, and you can switch back to the starter cat in Settings.
+Cat mode starts off. Turn it on in **Settings → Cat Mode** to put a full-width cat portrait at the top of your note. Choose **Choose Cat Image…** to replace the starter cat with your own photo or transparent PNG. Meimei Notes can remove a photo’s background on your Mac and keeps a full copy of the photo so you can switch between the cutout and the whole image. Use **Use Starter Cat** to switch back.
 
 The bundled starter cat is a transparent PNG generated with the built-in ImageGen tool and saved at [`App/Resources/StarterCat.png`](App/Resources/StarterCat.png).
 

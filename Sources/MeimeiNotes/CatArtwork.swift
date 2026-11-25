@@ -6,7 +6,7 @@ import Vision
 
 struct CatPortrait {
     let image: NSImage
-    let isCutout: Bool
+    let isFramed: Bool
 }
 
 private struct SavedCatArtwork: Codable, Sendable {
@@ -17,8 +17,10 @@ private struct SavedCatArtwork: Codable, Sendable {
 
     var portrait: CatPortrait? {
         let displayedCutout = showsCutout ? cutout : nil
-        guard let image = NSImage(data: displayedCutout ?? source) else { return nil }
-        return CatPortrait(image: image, isCutout: hasTransparentBackground || displayedCutout != nil)
+        let data = displayedCutout ?? source
+        guard let image = NSImage(data: data) else { return nil }
+        let isCutout = hasTransparentBackground || displayedCutout != nil
+        return CatPortrait(image: image, isFramed: !isCutout || CatImageProcessor.hasClippedEdge(data))
     }
 }
 
@@ -42,7 +44,7 @@ final class CatArtwork: ObservableObject {
         legacyURL = directory.appending(path: "Cat.png")
         starter = Bundle.main.url(forResource: "StarterCat", withExtension: "png")
             .flatMap { NSImage(contentsOf: $0) }
-            .map { CatPortrait(image: $0, isCutout: true) }
+            .map { CatPortrait(image: $0, isFramed: false) }
 
         let saved = (try? Data(contentsOf: customURL)).flatMap {
             try? PropertyListDecoder().decode(SavedCatArtwork.self, from: $0)
@@ -126,11 +128,21 @@ enum CatImageError: LocalizedError {
 }
 
 private enum CatImageProcessor {
+    private struct TransparentContent {
+        let bounds: CGRect
+        let hasClippedEdge: Bool
+    }
+
     static func loadLegacy(from url: URL) -> SavedCatArtwork? {
         guard let data = try? Data(contentsOf: url), let image = cgImage(from: data) else { return nil }
-        let bounds = transparentBounds(of: image)
-        guard bounds?.isNull != true else { return nil }
-        return SavedCatArtwork(source: data, hasTransparentBackground: bounds != nil)
+        let content = transparentContent(of: image)
+        guard content?.bounds.isNull != true else { return nil }
+        return SavedCatArtwork(source: data, hasTransparentBackground: content != nil)
+    }
+
+    static func hasClippedEdge(_ data: Data) -> Bool {
+        guard let image = cgImage(from: data) else { return false }
+        return transparentContent(of: image)?.hasClippedEdge == true
     }
 
     static func prepareImport(at url: URL) throws -> SavedCatArtwork {
@@ -147,9 +159,9 @@ private enum CatImageProcessor {
             throw CatImageError.unreadable
         }
 
-        if let bounds = transparentBounds(of: original) {
-            guard !bounds.isNull else { throw CatImageError.empty }
-            let cropped = crop(original, to: bounds)
+        if let content = transparentContent(of: original) {
+            guard !content.bounds.isNull else { throw CatImageError.empty }
+            let cropped = crop(original, to: content.bounds)
             return SavedCatArtwork(source: try png(from: cropped), hasTransparentBackground: true)
         }
 
@@ -197,10 +209,10 @@ private enum CatImageProcessor {
             let cutout = CIImage(cvPixelBuffer: buffer)
             let context = CIContext(options: [.useSoftwareRenderer: true])
             guard let image = context.createCGImage(cutout, from: cutout.extent),
-                  let bounds = transparentBounds(of: image), !bounds.isNull else {
+                  let content = transparentContent(of: image), !content.bounds.isNull else {
                 throw CatImageError.missingSubject
             }
-            return try png(from: crop(image, to: bounds))
+            return try png(from: crop(image, to: content.bounds))
         } catch {
             throw CatImageError.missingSubject
         }
@@ -222,7 +234,7 @@ private enum CatImageProcessor {
         }
     }
 
-    private static func transparentBounds(of image: CGImage) -> CGRect? {
+    private static func transparentContent(of image: CGImage) -> TransparentContent? {
         let alphaFormats: [CGImageAlphaInfo] = [.first, .last, .premultipliedFirst, .premultipliedLast]
         guard alphaFormats.contains(image.alphaInfo) else { return nil }
 
@@ -234,6 +246,7 @@ private enum CatImageProcessor {
                                       bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: bitmapInfo),
               let pixels = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        defer { withExtendedLifetime(context) {} }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         var minX = width, minY = height, maxX = -1, maxY = -1
@@ -252,7 +265,13 @@ private enum CatImageProcessor {
         }
 
         guard hasTransparentBackground else { return nil }
-        guard minX <= maxX, minY <= maxY else { return .null }
-        return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+        guard minX <= maxX, minY <= maxY else { return TransparentContent(bounds: .null, hasClippedEdge: false) }
+        let edgeAlpha: UInt8 = 64
+        let left = (0..<height).lazy.filter { pixels[$0 * bytesPerRow + 3] >= edgeAlpha }.count
+        let right = (0..<height).lazy.filter { pixels[$0 * bytesPerRow + bytesPerRow - 1] >= edgeAlpha }.count
+        let top = (0..<width).lazy.filter { pixels[$0 * 4 + 3] >= edgeAlpha }.count
+        let clipped = max(left, right) > height / 10 || top > width / 10
+        let bounds = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+        return TransparentContent(bounds: bounds, hasClippedEdge: clipped)
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var preferences: Preferences
     @ObservedObject var cat: CatArtwork
     @ViewState private var choosingFile = false
@@ -65,18 +66,22 @@ struct SettingsView: View {
 
     private var catSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Show a cat in the notes panel", isOn: $preferences.values.catEnabled)
+            Toggle("Show a cat on the note", isOn: $preferences.values.catEnabled)
 
             if preferences.values.catEnabled {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13).fill(.orange.opacity(0.10))
-                    if let portrait = cat.portrait {
-                        CatPortraitView(portrait: portrait)
-                            .padding(12)
-                            .accessibilityLabel("Cat preview")
-                    }
+                if let portrait = cat.portrait {
+                    let palette = Palette(isDark: colorScheme == .dark, showsCat: true)
+                    CatNoteHeader(portrait: portrait, palette: palette)
+                        .frame(height: 158)
+                        .padding(.bottom, 12)
+                        .background(palette.paper)
+                        .clipShape(.rect(cornerRadius: 12))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12).strokeBorder(palette.border).allowsHitTesting(false)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Cat preview")
                 }
-                .frame(height: 135)
 
                 HStack {
                     Button("Choose Cat Image…") { choosingFile = true }
