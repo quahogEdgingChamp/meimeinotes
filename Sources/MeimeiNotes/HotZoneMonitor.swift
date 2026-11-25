@@ -3,7 +3,7 @@ import AppKit
 @MainActor
 final class HotZoneMonitor {
     private let onEnter: (NSScreen) -> Void
-    private let onPointer: (CGPoint, Bool, TimeInterval) -> Void
+    private let onPointer: (CGPoint, NSScreen?, TimeInterval) -> Void
     private var preferences = PreferenceValues()
     private var pollingTimer: Timer?
     private var tracksPanel = false
@@ -11,7 +11,7 @@ final class HotZoneMonitor {
     private var enteredAt: TimeInterval = 0
     private var hasOpened = false
 
-    init(onEnter: @escaping (NSScreen) -> Void, onPointer: @escaping (CGPoint, Bool, TimeInterval) -> Void) {
+    init(onEnter: @escaping (NSScreen) -> Void, onPointer: @escaping (CGPoint, NSScreen?, TimeInterval) -> Void) {
         self.onEnter = onEnter
         self.onPointer = onPointer
     }
@@ -26,6 +26,11 @@ final class HotZoneMonitor {
     }
 
     func trackPanel(_ value: Bool) {
+        // A dismissal inside the trigger area should wait for a fresh pointer entry.
+        if tracksPanel && !value, let screen = hotScreen(at: NSEvent.mouseLocation) {
+            hoveredScreen = screen.frame
+            hasOpened = true
+        }
         tracksPanel = value
         updatePolling()
     }
@@ -68,9 +73,11 @@ final class HotZoneMonitor {
         let now = ProcessInfo.processInfo.systemUptime
         let hotScreen = hotScreen(at: pointer)
 
-        if tracksPanel { onPointer(pointer, hotScreen != nil, now) }
+        defer {
+            if tracksPanel { onPointer(pointer, hotScreen, now) }
+        }
 
-        guard NSEvent.pressedMouseButtons == 0, let screen = hotScreen else {
+        guard let screen = hotScreen else {
             hoveredScreen = nil
             return
         }
@@ -79,6 +86,8 @@ final class HotZoneMonitor {
             hoveredScreen = screen.frame
             enteredAt = now
             hasOpened = false
+        } else if NSEvent.pressedMouseButtons != 0 {
+            enteredAt = now
         } else if !hasOpened, now - enteredAt >= 0.16 {
             hasOpened = true
             onEnter(screen)

@@ -9,7 +9,7 @@ Meimei Notes is a native macOS menu-bar app with sticky notes and a countdown in
 
 If you downloaded a disk image, open it and drag **MeimeiNotes** onto **Applications** before launching it.
 
-Pause briefly with your pointer in the bottom-left corner of a display to bring the panel back. Move onto the panel to keep it open, then move away to dismiss it. **⌘Space** and **Open Notes** in the menu bar also bring it back. You can close it with **Esc** or **×**.
+Pause briefly with your pointer in the bottom-left corner of a display to bring the panel back. Move onto the panel to keep it open, then move away to dismiss it. **⌘Space** and **Open Notes** in the menu bar also bring it back. You can close it with **Esc** or **×**. The panel hides while Settings or the Export Notes dialog is open.
 
 In **Settings → General**, select any corner or choose **Custom spot** and click the display preview to place the trigger. The chosen position applies to each connected display. You can turn the pointer trigger off and use the menu bar to open the panel.
 

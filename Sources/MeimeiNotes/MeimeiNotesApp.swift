@@ -25,7 +25,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var exportDialog: NSSavePanel?
-    private var hover = PanelHover()
+    private var hover: PanelHover?
     private var openPopovers: Set<PanelPopover> = []
     private var subscriptions: Set<AnyCancellable> = []
     private lazy var notifications: TimerNotifications? = {
@@ -33,14 +33,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return TimerNotifications { [weak self] in self?.openNotes() }
     }()
     private lazy var hotZone = HotZoneMonitor(onEnter: { [weak self] screen in
-        guard let self else { return }
+        guard let self, self.utilityWindow == nil else { return }
         if self.panel.isVisible, self.panel.isOnActiveSpace, self.panel.screen?.frame == screen.frame {
             self.panel.orderFrontRegardless()
         } else {
             self.showPanel(on: screen, focus: false, fromHotZone: true)
         }
-    }, onPointer: { [weak self] pointer, atHotZone, time in
-        self?.updatePanelHover(pointer: pointer, atHotZone: atHotZone, time: time)
+    }, onPointer: { [weak self] pointer, hotScreen, time in
+        self?.updatePanelHover(pointer: pointer, hotScreen: hotScreen, time: time)
     })
     private lazy var panel: NotesPanel = makePanel()
 
@@ -62,6 +62,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var preferredScreen: NSScreen? {
         HotZoneMonitor.screen(at: NSEvent.mouseLocation) ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private var utilityWindow: NSWindow? {
+        if let exportDialog { return exportDialog }
+        return settingsWindow?.isVisible == true ? settingsWindow : nil
     }
 
     private func watchState() {
@@ -133,33 +138,42 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showPanel(on screen: NSScreen?, focus: Bool, fromHotZone: Bool = false) {
         positionPanel(on: screen, using: preferences.values)
-        hover = PanelHover(openedAtHotZone: fromHotZone)
+        hover = PanelHover(openedAtHotZone: fromHotZone, pointer: NSEvent.mouseLocation)
         hotZone.trackPanel(true)
         if focus { panel.makeKeyAndOrderFront(nil) } else { panel.orderFrontRegardless() }
     }
 
     @objc private func openNotes() {
+        if let utilityWindow {
+            focusWindow(utilityWindow)
+            return
+        }
         showPanel(on: panel.isVisible ? nil : preferredScreen, focus: true)
     }
 
     private func dismissPanel() {
         panel.orderOut(nil)
         hotZone.trackPanel(false)
+        hover = nil
         openPopovers.removeAll()
     }
 
-    private func updatePanelHover(pointer: CGPoint, atHotZone: Bool, time: TimeInterval) {
+    private func updatePanelHover(pointer: CGPoint, hotScreen: NSScreen?, time: TimeInterval) {
         guard panel.isVisible else { return }
+        let atHotZone = hotScreen.map { $0.frame == panel.screen?.frame } ?? false
         let busy = NSEvent.pressedMouseButtons != 0 || RunLoop.main.currentMode == .eventTracking
-            || exportDialog != nil || !openPopovers.isEmpty
-        if hover.shouldDismiss(at: time, insidePanel: panel.frame.contains(pointer),
-                              insideHotZone: atHotZone, interactionInProgress: busy) {
+            || !openPopovers.isEmpty
+        if hover?.shouldDismiss(at: time, pointer: pointer, insidePanel: panel.frame.contains(pointer),
+                               insideHotZone: atHotZone, interactionInProgress: busy) == true {
             dismissPanel()
         }
     }
 
     @objc private func exportNotes() {
-        guard exportDialog == nil else { return }
+        if let exportDialog {
+            focusWindow(exportDialog)
+            return
+        }
         let dialog = NSSavePanel()
         dialog.title = "Export Notes"
         dialog.prompt = "Export"
@@ -167,6 +181,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         dialog.nameFieldStringValue = "MeimeiNotes Backup.json"
         exportDialog = dialog
 
+        dismissPanel()
         NSApp.activate()
         dialog.begin { [weak self] response in
             guard let self else { return }
@@ -183,6 +198,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
+        if let exportDialog {
+            focusWindow(exportDialog)
+            return
+        }
         let window: NSWindow
         if let existing = settingsWindow {
             window = existing
@@ -195,6 +214,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
             settingsWindow = window
         }
+        dismissPanel()
+        focusWindow(window)
+    }
+
+    private func focusWindow(_ window: NSWindow) {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
