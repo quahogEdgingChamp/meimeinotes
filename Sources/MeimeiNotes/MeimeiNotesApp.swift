@@ -20,6 +20,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let preferences = Preferences()
     private let notes = NotesStore()
     private let timer = FocusTimer()
+    private let stopwatch = Stopwatch()
     private let cat = CatArtwork()
     private let chime = NSSound(named: "Glass")
     private var statusItem: NSStatusItem?
@@ -33,12 +34,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return TimerNotifications { [weak self] in self?.openNotes() }
     }()
     private lazy var hotZone = HotZoneMonitor(onEnter: { [weak self] screen in
-        guard let self, self.utilityWindow == nil else { return }
-        if self.panel.isVisible, self.panel.isOnActiveSpace, self.panel.screen?.frame == screen.frame {
-            self.panel.orderFrontRegardless()
-        } else {
-            self.showPanel(on: screen, focus: false, fromHotZone: true)
-        }
+        self?.openFromHotZone(on: screen) ?? false
     }, onPointer: { [weak self] pointer, hotScreen, time in
         self?.updatePanelHover(pointer: pointer, hotScreen: hotScreen, time: time)
     })
@@ -78,9 +74,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }.store(in: &subscriptions)
 
-        timer.$secondsRemaining.combineLatest(timer.$countdown)
+        timer.$secondsRemaining.combineLatest(timer.$countdown).map { _ in () }
+            .merge(with: stopwatch.$secondsElapsed.combineLatest(stopwatch.$session).map { _ in () },
+                   preferences.$values.map(\.clockMode).removeDuplicates().map { _ in () })
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateStatusItem() }
+            .sink { [weak self] in self?.updateStatusItem() }
             .store(in: &subscriptions)
 
         timer.$countdown.combineLatest(preferences.$values.map(\.timerNotifications))
@@ -111,7 +109,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.animationBehavior = .utilityWindow
         panel.dismiss = { [weak self] in self?.dismissPanel() }
         panel.contentView = NSHostingView(rootView: PanelView(
-            notes: notes, timer: timer, preferences: preferences, cat: cat,
+            notes: notes, timer: timer, stopwatch: stopwatch, preferences: preferences, cat: cat,
             exportNotes: { [weak self] in self?.exportNotes() },
             openSettings: { [weak self] in self?.openSettings() },
             dismiss: { [weak self] in self?.dismissPanel() },
@@ -143,6 +141,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if focus { panel.makeKeyAndOrderFront(nil) } else { panel.orderFrontRegardless() }
     }
 
+    /// Returns false while the panel must stay hidden, so the hot zone tries again.
+    private func openFromHotZone(on screen: NSScreen) -> Bool {
+        guard exportDialog == nil, !isPointerOverSettings else { return false }
+        if panel.isVisible, panel.isOnActiveSpace, panel.screen?.frame == screen.frame {
+            // Treat a return to the hot zone like a fresh open, with the longer grace period.
+            hover = PanelHover(openedAtHotZone: true, pointer: NSEvent.mouseLocation)
+            panel.orderFrontRegardless()
+        } else {
+            showPanel(on: screen, focus: false, fromHotZone: true)
+        }
+        return true
+    }
+
+    private var isPointerOverSettings: Bool {
+        guard let settingsWindow, settingsWindow.isVisible else { return false }
+        let frontWindow = NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0)
+        return frontWindow == settingsWindow.windowNumber
+    }
+
     @objc private func openNotes() {
         if let utilityWindow {
             focusWindow(utilityWindow)
@@ -160,7 +177,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updatePanelHover(pointer: CGPoint, hotScreen: NSScreen?, time: TimeInterval) {
         guard panel.isVisible else { return }
-        let atHotZone = hotScreen.map { $0.frame == panel.screen?.frame } ?? false
+        // Any hot zone keeps the panel up; one on another display moves the panel there.
+        let atHotZone = hotScreen != nil
         let busy = NSEvent.pressedMouseButtons != 0 || RunLoop.main.currentMode == .eventTracking
             || !openPopovers.isEmpty
         if hover?.shouldDismiss(at: time, pointer: pointer, insidePanel: panel.frame.contains(pointer),
@@ -238,19 +256,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
+        // Show the clock selected in the panel, or the other one if only it is in use.
+        let timerInUse = timer.phase != .ready
+        let stopwatchInUse = stopwatch.phase != .ready
+        let showsStopwatch = stopwatchInUse && (preferences.values.clockMode == .stopwatch || !timerInUse)
         let symbol: String
-        switch timer.phase {
-        case .running, .paused: symbol = "timer"
-        case .finished: symbol = "bell.badge"
-        case .ready: symbol = "note.text"
+        var time: String?
+        if showsStopwatch {
+            symbol = "stopwatch"
+            time = stopwatch.display
+        } else {
+            switch timer.phase {
+            case .running, .paused:
+                symbol = "timer"
+                time = timer.display
+            case .finished: symbol = "bell.badge"
+            case .ready: symbol = "note.text"
+            }
         }
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Meimei Notes")
         image?.isTemplate = true
         button.image = image
         button.imagePosition = .imageLeading
-        let showsTime = timer.phase == .running || timer.phase == .paused
         button.attributedTitle = NSAttributedString(
-            string: showsTime ? " " + timer.display : "",
+            string: time.map { " " + $0 } ?? "",
             attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)]
         )
         button.toolTip = timer.phase == .finished ? "Meimei Notes · Time’s up" : "Meimei Notes"

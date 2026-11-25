@@ -11,6 +11,7 @@ struct PanelView: View {
     @Environment(\.colorScheme) private var colorScheme
     let notes: NotesStore
     let timer: FocusTimer
+    let stopwatch: Stopwatch
     @ObservedObject var preferences: Preferences
     @ObservedObject var cat: CatArtwork
     let exportNotes: () -> Void
@@ -39,7 +40,9 @@ struct PanelView: View {
                 IconButton("Close Panel", symbol: "xmark", action: dismiss)
             }
 
-            TimerCard(timer: timer, palette: palette) { popoverChanged(.customDuration, $0) }
+            TimerCard(timer: timer, stopwatch: stopwatch, mode: $preferences.values.clockMode, palette: palette) {
+                popoverChanged(.customDuration, $0)
+            }
             NotesPane(notes: notes, portrait: palette.showsCat ? cat.portrait : nil, palette: palette) {
                 popoverChanged(.deleteNote, $0)
             }
@@ -58,6 +61,8 @@ struct PanelView: View {
 
 private struct TimerCard: View {
     @ObservedObject var timer: FocusTimer
+    @ObservedObject var stopwatch: Stopwatch
+    @Binding var mode: ClockMode
     let palette: Palette
     let popoverChanged: (Bool) -> Void
 
@@ -68,55 +73,39 @@ private struct TimerCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: palette.showsCat ? 8 : 10) {
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(status)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(timer.phase == .finished ? palette.accent : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        ModeSwitch(mode: $mode, running: runningModes, palette: palette)
+                        if let status {
+                            Text(status)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(isFinished ? palette.accent : .secondary)
+                        }
+                    }
 
-                    Text(timer.display)
+                    Text(mode == .timer ? timer.display : stopwatch.display)
                         .font(.system(size: 43, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                        .accessibilityLabel("Time remaining")
-                        .accessibilityValue("\(timer.secondsRemaining / 60) minutes, \(timer.secondsRemaining % 60) seconds")
+                        .accessibilityLabel(mode == .timer ? "Time remaining" : "Time elapsed")
+                        .accessibilityValue(spokenTime)
                 }
 
                 Spacer()
-                timerActions
+                clockActions
             }
-            .frame(height: palette.showsCat ? 65 : 77)
+            .frame(height: palette.showsCat ? 72 : 77)
 
-            HStack(spacing: 5) {
-                ForEach(FocusTimer.presets, id: \.self) { preset in
-                    let isSelected = timer.countdown.duration == preset * 60
-                    Button("\(preset)m") { timer.setDuration(preset * 60) }
-                        .buttonStyle(ChipStyle(
-                            foreground: isSelected ? palette.accent : .secondary,
-                            background: isSelected ? palette.selection : palette.control
-                        ))
-                        .help("Set a \(preset)-minute timer")
-                        .accessibilityLabel("\(preset) minutes")
-                        .accessibilityAddTraits(isSelected ? .isSelected : [])
+            if mode == .timer {
+                presets
+
+                GeometryReader { proxy in
+                    Capsule().fill(palette.selection)
+                    Capsule().fill(palette.accent)
+                        .frame(width: proxy.size.width * timer.progress)
                 }
-
-                Button("Custom…") {
-                    minutes = String(timer.countdown.duration / 60)
-                    seconds = String(timer.countdown.duration % 60)
-                    editingDuration = true
-                }
-                .buttonStyle(ChipStyle(foreground: .secondary, background: palette.control))
-                .help("Set a custom timer duration")
-                .popover(isPresented: $editingDuration, arrowEdge: .bottom) { durationEditor }
-
-                Spacer(minLength: 1)
+                .frame(height: 3)
+                .accessibilityHidden(true)
             }
-
-            GeometryReader { proxy in
-                Capsule().fill(palette.selection)
-                Capsule().fill(palette.accent)
-                    .frame(width: proxy.size.width * timer.progress)
-            }
-            .frame(height: 3)
-            .accessibilityHidden(true)
         }
         .padding(palette.showsCat ? 11 : 13)
         .background(palette.card, in: RoundedRectangle(cornerRadius: 15))
@@ -124,33 +113,78 @@ private struct TimerCard: View {
             RoundedRectangle(cornerRadius: 15).strokeBorder(palette.border).allowsHitTesting(false)
         }
         .onChange(of: editingDuration) { _, shown in popoverChanged(shown) }
+        .onChange(of: mode) { _, _ in editingDuration = false }
     }
 
-    private var timerActions: some View {
-        HStack(spacing: 6) {
-            IconButton("Reset Timer", symbol: "arrow.counterclockwise", background: palette.control) { timer.reset() }
-                .disabled(timer.phase == .ready)
-                .opacity(timer.phase == .ready ? 0.48 : 1)
+    private var presets: some View {
+        HStack(spacing: 5) {
+            ForEach(FocusTimer.presets, id: \.self) { preset in
+                let isSelected = timer.countdown.duration == preset * 60
+                Button("\(preset)m") { timer.setDuration(preset * 60) }
+                    .buttonStyle(ChipStyle(
+                        foreground: isSelected ? palette.accent : .secondary,
+                        background: isSelected ? palette.selection : palette.control
+                    ))
+                    .help("Set a \(preset)-minute timer")
+                    .accessibilityLabel("\(preset) minutes")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
 
-            IconButton(playLabel, symbol: timer.phase == .running ? "pause.fill" : "play.fill",
-                       foreground: palette.onAction, background: palette.action, width: 35) { timer.toggle() }
+            Button("Custom…") {
+                minutes = String(timer.countdown.duration / 60)
+                seconds = String(timer.countdown.duration % 60)
+                editingDuration = true
+            }
+            .buttonStyle(ChipStyle(foreground: .secondary, background: palette.control))
+            .help("Set a custom timer duration")
+            .popover(isPresented: $editingDuration, arrowEdge: .bottom) { durationEditor }
+
+            Spacer(minLength: 1)
         }
     }
+
+    private var clockActions: some View {
+        HStack(spacing: 6) {
+            IconButton("Reset \(mode.title)", symbol: "arrow.counterclockwise", background: palette.control) {
+                if mode == .timer { timer.reset() } else { stopwatch.reset() }
+            }
+            .disabled(!canReset)
+            .opacity(canReset ? 1 : 0.48)
+
+            IconButton(playLabel, symbol: isRunning ? "pause.fill" : "play.fill",
+                       foreground: palette.onAction, background: palette.action, width: 35) {
+                if mode == .timer { timer.toggle() } else { stopwatch.toggle() }
+            }
+        }
+    }
+
+    private var runningModes: Set<ClockMode> {
+        var modes: Set<ClockMode> = []
+        if timer.phase == .running { modes.insert(.timer) }
+        if stopwatch.phase == .running { modes.insert(.stopwatch) }
+        return modes
+    }
+
+    private var isRunning: Bool { runningModes.contains(mode) }
+    private var isPaused: Bool { mode == .timer ? timer.phase == .paused : stopwatch.phase == .paused }
+    private var isFinished: Bool { mode == .timer && timer.phase == .finished }
+    private var canReset: Bool { mode == .timer ? timer.phase != .ready : stopwatch.phase != .ready }
 
     private var playLabel: String {
-        switch timer.phase {
-        case .running: "Pause Timer"
-        case .paused: "Resume Timer"
-        case .ready, .finished: "Start Timer"
-        }
+        if isRunning { return "Pause \(mode.title)" }
+        return isPaused ? "Resume \(mode.title)" : "Start \(mode.title)"
     }
 
-    private var status: String {
-        switch timer.phase {
-        case .ready, .running: "Timer"
-        case .paused: "Paused"
-        case .finished: "Time’s up"
-        }
+    private var status: String? {
+        if isPaused { return "Paused" }
+        return isFinished ? "Time’s up" : nil
+    }
+
+    private var spokenTime: String {
+        let total = mode == .timer ? timer.secondsRemaining : stopwatch.secondsElapsed
+        // The countdown reads as minutes up to 99, matching its display.
+        let hours = mode == .stopwatch ? total / 3600 : 0
+        return (hours > 0 ? "\(hours) hours, " : "") + "\(total / 60 - hours * 60) minutes, \(total % 60) seconds"
     }
 
     private var chosenDuration: Int? {
@@ -378,6 +412,37 @@ private struct NotesPane: View {
     }
 }
 
+private struct ModeSwitch: View {
+    @Binding var mode: ClockMode
+    let running: Set<ClockMode>
+    let palette: Palette
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ClockMode.allCases) { option in
+                let isSelected = mode == option
+                Button { mode = option } label: {
+                    HStack(spacing: 4) {
+                        Text(option.title)
+                        if !isSelected && running.contains(option) {
+                            Circle().fill(palette.accent).frame(width: 5, height: 5)
+                        }
+                    }
+                }
+                .buttonStyle(ChipStyle(foreground: isSelected ? palette.accent : .secondary,
+                                       background: isSelected ? palette.selection : .clear,
+                                       horizontalPadding: 7, height: 16, cornerRadius: 5))
+                .help(option == .timer ? "Count down from a set time" : "Count up from zero")
+                .accessibilityLabel(option.title)
+                .accessibilityValue(running.contains(option) ? "Running" : "")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(palette.control, in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
 private struct IconButton: View {
     let label: String
     let symbol: String
@@ -412,21 +477,23 @@ private struct ChipStyle: ButtonStyle {
     let foreground: Color
     let background: Color
     var horizontalPadding: CGFloat = 8
+    var height: CGFloat = 24
+    var cornerRadius: CGFloat = 7
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(foreground)
             .padding(.horizontal, horizontalPadding)
-            .frame(minHeight: 24)
-            .background(background, in: RoundedRectangle(cornerRadius: 7))
+            .frame(minHeight: height)
+            .background(background, in: RoundedRectangle(cornerRadius: cornerRadius))
             .overlay {
                 if configuration.isPressed {
-                    RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(0.10))
+                    RoundedRectangle(cornerRadius: cornerRadius).fill(.primary.opacity(0.10))
                         .allowsHitTesting(false)
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 }
 

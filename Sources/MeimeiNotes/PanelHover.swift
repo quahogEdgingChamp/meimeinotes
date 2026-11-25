@@ -2,13 +2,11 @@ import CoreGraphics
 import Foundation
 
 struct PanelHover {
-    private let openedAtHotZone: Bool
     private var pointerAtManualOpen: CGPoint?
     private var hasEntered = false
     private var leftAt: TimeInterval?
 
     init(openedAtHotZone: Bool, pointer: CGPoint) {
-        self.openedAtHotZone = openedAtHotZone
         pointerAtManualOpen = openedAtHotZone ? nil : pointer
     }
 
@@ -19,8 +17,8 @@ struct PanelHover {
             self.pointerAtManualOpen = nil
         }
 
-        let waitingAtHotZone = openedAtHotZone && !hasEntered && insideHotZone
-        if insidePanel || waitingAtHotZone || pointerAtManualOpen != nil || interactionInProgress {
+        // The pointer in a hot zone is asking for the panel, so it stays open there.
+        if insidePanel || insideHotZone || pointerAtManualOpen != nil || interactionInProgress {
             leftAt = nil
             return false
         }

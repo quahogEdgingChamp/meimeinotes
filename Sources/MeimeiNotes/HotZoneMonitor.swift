@@ -2,7 +2,8 @@ import AppKit
 
 @MainActor
 final class HotZoneMonitor {
-    private let onEnter: (NSScreen) -> Void
+    /// Returns whether the panel opened. A false result is retried while the pointer stays.
+    private let onEnter: (NSScreen) -> Bool
     private let onPointer: (CGPoint, NSScreen?, TimeInterval) -> Void
     private var preferences = PreferenceValues()
     private var pollingTimer: Timer?
@@ -11,7 +12,7 @@ final class HotZoneMonitor {
     private var enteredAt: TimeInterval = 0
     private var hasOpened = false
 
-    init(onEnter: @escaping (NSScreen) -> Void, onPointer: @escaping (CGPoint, NSScreen?, TimeInterval) -> Void) {
+    init(onEnter: @escaping (NSScreen) -> Bool, onPointer: @escaping (CGPoint, NSScreen?, TimeInterval) -> Void) {
         self.onEnter = onEnter
         self.onPointer = onPointer
     }
@@ -26,7 +27,7 @@ final class HotZoneMonitor {
     }
 
     func trackPanel(_ value: Bool) {
-        // A dismissal inside the trigger area should wait for a fresh pointer entry.
+        // Closing the panel with the pointer in the trigger area waits for a fresh pointer entry.
         if tracksPanel && !value, let screen = hotScreen(at: NSEvent.mouseLocation) {
             hoveredScreen = screen.frame
             hasOpened = true
@@ -89,8 +90,7 @@ final class HotZoneMonitor {
         } else if NSEvent.pressedMouseButtons != 0 {
             enteredAt = now
         } else if !hasOpened, now - enteredAt >= 0.16 {
-            hasOpened = true
-            onEnter(screen)
+            hasOpened = onEnter(screen)
         }
     }
 }

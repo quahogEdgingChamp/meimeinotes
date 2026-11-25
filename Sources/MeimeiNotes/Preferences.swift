@@ -46,6 +46,19 @@ enum TriggerLocation: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ClockMode: String, Codable, CaseIterable, Identifiable {
+    case timer, stopwatch
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .timer: "Timer"
+        case .stopwatch: "Stopwatch"
+        }
+    }
+}
+
 struct PreferenceValues: Codable, Equatable {
     var hotZoneEnabled = true
     var triggerLocation = TriggerLocation.bottomLeft
@@ -53,10 +66,16 @@ struct PreferenceValues: Codable, Equatable {
     var catEnabled = false
     var timerSound = true
     private var timerNotificationPreference: Bool?
+    private var clockModePreference: ClockMode?
 
     var timerNotifications: Bool {
         get { timerNotificationPreference ?? true }
         set { timerNotificationPreference = newValue }
+    }
+
+    var clockMode: ClockMode {
+        get { clockModePreference ?? .timer }
+        set { clockModePreference = newValue }
     }
 
     var triggerPoint: TriggerPoint { triggerLocation.point(custom: customPoint) }

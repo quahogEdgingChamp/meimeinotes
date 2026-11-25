@@ -1,6 +1,6 @@
 # Meimei Notes
 
-Meimei Notes is a native macOS menu-bar app with sticky notes and a countdown in one floating panel. It runs on macOS 14 or later.
+Meimei Notes is a native macOS menu-bar app with sticky notes, a countdown timer and a stopwatch in one floating panel. It runs on macOS 14 or later.
 
 ## Install and open
 
@@ -9,16 +9,18 @@ Meimei Notes is a native macOS menu-bar app with sticky notes and a countdown in
 
 If you downloaded a disk image, open it and drag **MeimeiNotes** onto **Applications** before launching it.
 
-Pause briefly with your pointer in the bottom-left corner of a display to bring the panel back. Move onto the panel to keep it open, then move away to dismiss it. **⌘Space** and **Open Notes** in the menu bar also bring it back. You can close it with **Esc** or **×**. The panel hides while Settings or the Export Notes dialog is open.
+Pause briefly with your pointer in the bottom-left corner of a display to bring the panel back. The panel stays open while the pointer is on it or in the corner, and closes when you move away from both. **⌘Space** and **Open Notes** in the menu bar also bring it back. You can close it with **Esc** or **×**. After you close it with the pointer in the corner, move out of the corner and back to reopen it. Opening Settings or Export Notes hides the panel. The corner doesn’t open it while the Export Notes dialog is open or while the pointer is over the Settings window.
 
 In **Settings → General**, select any corner or choose **Custom spot** and click the display preview to place the trigger. The chosen position applies to each connected display. You can turn the pointer trigger off and use the menu bar to open the panel.
 
-## Notes and timer
+## Notes, timer and stopwatch
 
 - Write in the note area. Use **+** for a new note and click the magnifying glass next to the note title to search titles and text or switch notes. Pin a note to keep it at the top of the list. The app saves edits locally as you type.
 - Choose **Export Notes…** from the panel or the menu bar to save a JSON backup with all notes, pins, and the selected note.
 - Pick a timer preset or use **Custom…** to set a duration from 1 second to 99 minutes and 59 seconds. Start, pause, resume, or reset the countdown from the panel.
-- The timer keeps running when you close the panel, with the remaining time shown in the menu bar. Allow notifications when macOS asks on the first countdown. The system can deliver the countdown alert with the panel closed or after your Mac wakes. Change notifications and the app’s chime in **Settings → General**.
+- Switch between **Timer** and **Stopwatch** at the top of the clock. The stopwatch counts up from 00:00, and you can start, pause, resume, or reset it. Each keeps its own time, so a countdown keeps running while you use the stopwatch. A dot marks the one running in the background.
+- The timer and stopwatch keep running when you close the panel. The menu bar shows the time of the one selected in the panel, or the other one if only it is in use.
+- Allow notifications when macOS asks on the first countdown. The system can deliver the countdown alert with the panel closed or after your Mac wakes. Change notifications and the app’s chime in **Settings → General**.
 
 ## Cat mode
 
